@@ -1,0 +1,21 @@
+build: false
+branches:
+  only:
+    - master
+cache:
+  - C:\Users\appveyor\.cargo -> appveyor.yml
+environment:
+  global:
+    CARGO_HOME: C:\Users\appveyor\.cargo
+install:
+  - curl -sSf -o rustup-init.exe https://win.rustup.rs
+  - rustup-init.exe -y
+  - set PATH=%PATH%;C:\Users\appveyor\.cargo\bin
+  - rustup install stable nightly
+  - rustup default stable
+  - rustup component add rustfmt-preview
+  - cargo +nightly install clippy --force
+test_script:
+  - cargo fmt -- --error-on-unformatted --write-mode diff
+  - cargo +nightly clippy
+  - cargo test
