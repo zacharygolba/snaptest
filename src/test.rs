@@ -1,131 +1,86 @@
-use std::fmt::{self, Debug, Display, Formatter};
-use std::env::current_dir;
+//! Data structures and behavior for generated snapshot tests.
+
+use std::env;
+use std::fmt::Debug;
 use std::path::PathBuf;
 
-use Error;
-use diff::{Diff, Line};
-use store::Store;
+use diff::{self, Result as Diff};
 
-type Runner<T> = fn() -> Result<T, Error>;
+use report::Report;
+use store::Store;
 
 lazy_static! {
     static ref STORE: Store = Store::load().expect("failed to load snaptest store");
 }
 
-#[derive(Clone, Debug)]
-pub struct Test<T> {
+#[derive(Copy, Clone, Debug)]
+pub struct Test {
     file: &'static str,
-    ident: &'static str,
-    module: &'static str,
-    output: Option<String>,
-    ret_ty: &'static str,
-    runner: Runner<T>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Builder<T> {
-    file: Option<&'static str>,
-    ident: Option<&'static str>,
-    module: Option<&'static str>,
-    ret_ty: Option<&'static str>,
-    runner: Option<Runner<T>>,
+    name: &'static str,
+    path: &'static str,
+    uuid: &'static str,
+    ret: &'static str,
 }
 
 #[derive(Copy, Clone, Debug)]
-struct Report<'a> {
-    diff: &'a [Line<'a>],
-    file: &'a str,
-    ident: &'a str,
-    module: &'a str,
-    ret_ty: &'a str,
+pub struct Builder {
+    file: Option<&'static str>,
+    name: Option<&'static str>,
+    path: Option<&'static str>,
+    uuid: Option<&'static str>,
+    ret: Option<&'static str>,
 }
 
-impl<T: Debug> Test<T> {
-    pub fn builder() -> Builder<T> {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Outcome {
+    Failure(String, String),
+    Success,
+}
+
+impl Test {
+    pub fn builder() -> Builder {
         Builder {
             file: None,
-            ident: None,
-            runner: None,
-            module: None,
-            ret_ty: None,
+            name: None,
+            path: None,
+            uuid: None,
+            ret: None,
         }
     }
 
-    pub fn run(self) -> Result<(), Error> {
-        let key = String::new() + self.file + ":" + self.ident;
-        let value = format!("{:#?}", (self.runner)()?);
-
-        if !STORE.contains(&key)? {
-            STORE.insert(key, value)?;
-            return STORE.save();
-        }
-
-        STORE.compare(&key, |stored| match Diff::new(stored, &value) {
-            Diff::Lines(ref diff) => panic!("{}", Report::new(&self, diff)),
-            Diff::Same => Ok(()),
-        })
-    }
-}
-
-impl<T: Debug> Builder<T> {
-    pub fn build(&mut self) -> Test<T> {
-        Test {
-            file: required("file", &mut self.file),
-            ident: required("ident", &mut self.ident),
-            module: required("module", &mut self.module),
-            output: None,
-            runner: required("runner", &mut self.runner),
-            ret_ty: required("ret_ty", &mut self.ret_ty),
-        }
+    pub fn file(&self) -> &'static str {
+        self.file
     }
 
-    pub fn file(&mut self, value: &'static str) -> &mut Builder<T> {
-        self.file = Some(value);
-        self
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
-    pub fn ident(&mut self, value: &'static str) -> &mut Builder<T> {
-        self.ident = Some(value);
-        self
+    pub fn path(&self) -> &'static str {
+        self.path
     }
 
-    pub fn module(&mut self, value: &'static str) -> &mut Builder<T> {
-        self.module = Some(value);
-        self
+    pub fn uuid(&self) -> &'static str {
+        self.uuid
     }
 
-    pub fn ret_ty(&mut self, value: &'static str) -> &mut Builder<T> {
-        self.ret_ty = Some(value);
-        self
+    pub fn ret(&self) -> &'static str {
+        self.ret
     }
 
-    pub fn runner(&mut self, value: Runner<T>) -> &mut Builder<T> {
-        self.runner = Some(value);
-        self
-    }
-}
-
-impl<'a> Report<'a> {
-    fn new<T>(test: &'a Test<T>, diff: &'a [Line<'a>]) -> Report<'a> {
-        Report {
-            diff,
-            file: test.file,
-            ident: test.ident,
-            module: test.module,
-            ret_ty: test.ret_ty,
-        }
+    pub(crate) fn basename(&self) -> Option<PathBuf> {
+        let path = PathBuf::from(self.file);
+        Some(PathBuf::from(path.file_name()?))
     }
 
-    fn dirname(&self) -> Result<PathBuf, Error> {
-        let mut path = PathBuf::new();
-        let cwd = current_dir()?;
-
-        path.push(self.file);
+    pub(crate) fn dirname(&self) -> ::Result<PathBuf> {
+        let path = PathBuf::from(self.file);
+        let cwd = env::current_dir()?;
 
         for component in cwd.components() {
-            let part = component.as_ref();
+            let part = component.as_os_str();
 
-            if path.starts_with(&part) {
+            if path.starts_with(part) {
                 path.strip_prefix(part)?;
             }
         }
@@ -135,73 +90,87 @@ impl<'a> Report<'a> {
             None => Ok(PathBuf::new()),
         }
     }
+}
 
-    fn filename(&self) -> Option<String> {
-        let mut path = PathBuf::new();
+impl Builder {
+    pub fn run<T: Debug>(&mut self, f: fn() -> ::Result<T>) -> ::Result<Report> {
+        macro_rules! required {
+            ( $self:ident.$field:ident ) => (match $self.$field.take() {
+                Some(inner) => inner,
+                None => bail!("{}  is a required field", stringify!($field)),
+            })
+        }
 
-        path.push(self.file);
-        Some(path.file_name()?.to_str()?.to_owned())
+        let test = Test {
+            file: required!(self.file),
+            name: required!(self.name),
+            path: required!(self.path),
+            uuid: required!(self.uuid),
+            ret: required!(self.ret),
+        };
+
+        STORE.compare(
+            test.uuid(),
+            || {
+                let key = test.uuid().to_owned();
+                let value = format!("{:#?}", f()?);
+
+                STORE.insert(key, value)?;
+                STORE.save()?;
+
+                Ok(Report::new(test, Outcome::Success))
+            },
+            |left| {
+                let right = format!("{:#?}", f()?);
+                let outcome = if left == right {
+                    Outcome::Success
+                } else {
+                    Outcome::Failure(left.to_owned(), right)
+                };
+
+                Ok(Report::new(test, outcome))
+            },
+        )
+    }
+
+    pub fn file(&mut self, value: &'static str) -> &mut Builder {
+        self.file = Some(value);
+        self
+    }
+
+    pub fn name(&mut self, value: &'static str) -> &mut Builder {
+        self.name = Some(value);
+        self
+    }
+
+    pub fn path(&mut self, value: &'static str) -> &mut Builder {
+        self.path = Some(value);
+        self
+    }
+
+    pub fn uuid(&mut self, value: &'static str) -> &mut Builder {
+        self.uuid = Some(value);
+        self
+    }
+
+    pub fn ret(&mut self, value: &'static str) -> &mut Builder {
+        self.ret = Some(value);
+        self
     }
 }
 
-impl<'a> Display for Report<'a> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        macro_rules! indentln {
-            ( $s:expr ) => ( indentln!($s,) );
-            ( $s:expr, $($arg:expr),* ) => (
-                writeln!(f, concat!("  ", $s), $($arg),*)
-            );
+impl Outcome {
+    pub fn diff(&self) -> Vec<Diff<&str>> {
+        match *self {
+            Outcome::Failure(ref l, ref r) => diff::lines(l, r),
+            Outcome::Success => Vec::new(),
         }
-
-        macro_rules! newln {
-            () => ( writeln!(f, "") );
-        }
-
-        newln!()?;
-        newln!()?;
-        newln!()?;
-        indentln!(
-            "{} {}{} {}{}{}",
-            reverse!(red!(" FAILED ")),
-            dimmed!("{}::", self.module),
-            self.ident,
-            dimmed!("({}/", self.dirname().unwrap().display()),
-            self.filename().unwrap(),
-            dimmed!(")")
-        )?;
-        newln!()?;
-        indentln!("{}", green!("- Snapshot"))?;
-        indentln!("{}", red!("+ Received"))?;
-
-        newln!()?;
-        indentln!(
-            "{} {}() -> {} {{",
-            purple!("fn"),
-            blue!("{}", self.ident),
-            purple!("{}", self.ret_ty)
-        )?;
-        newln!()?;
-
-        for line in self.diff {
-            match *line {
-                Line::Eq(value) => indentln!("      {}", dimmed!("{}", value))?,
-                Line::Ne(left, right) => {
-                    indentln!("{}     {}", green!("-"), green!("{}", left))?;
-                    indentln!("{}     {}", red!("+"), red!("{}", right))?;
-                }
-            }
-        }
-
-        newln!()?;
-        indentln!("}}")?;
-        newln!()?;
-        newln!()
     }
-}
 
-fn required<T>(name: &str, opt: &mut Option<T>) -> T {
-    match opt.take() {
-        Some(value) => value,
-        None => panic!("{} is a required field", name),
+    pub fn was_successful(&self) -> bool {
+        match *self {
+            Outcome::Failure(_, _) => false,
+            Outcome::Success => true,
+        }
     }
 }

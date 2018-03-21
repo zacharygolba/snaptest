@@ -5,8 +5,6 @@ use std::sync::RwLock;
 
 use bincode::{deserialize, serialize};
 
-use Error;
-
 type Data = HashMap<String, String>;
 
 #[derive(Debug, Default)]
@@ -19,7 +17,7 @@ impl Store {
         Default::default()
     }
 
-    pub fn load() -> Result<Store, Error> {
+    pub fn load() -> ::Result<Store> {
         let mut store = Store::new();
         let mut file = find_or_create_snapfile()?;
 
@@ -35,63 +33,50 @@ impl Store {
         Ok(store)
     }
 
-    pub fn compare<F>(&self, key: &str, f: F) -> Result<(), Error>
+    pub fn compare<D, F, T>(&self, key: &str, default: D, f: F) -> ::Result<T>
     where
-        F: FnOnce(&str) -> Result<(), Error>,
+        D: FnOnce() -> ::Result<T>,
+        F: FnOnce(&str) -> ::Result<T>,
     {
-        self.read_and_then(|data| match data.get(key) {
-            Some(value) => Ok(f(value)?),
-            None => Ok(()),
-        })
+        match self.read(|data| data.get(key).map(|value| f(value)))? {
+            Some(result) => result,
+            None => default(),
+        }
     }
 
-    pub fn contains(&self, key: &str) -> Result<bool, Error> {
-        self.read(|data| data.contains_key(key))
-    }
-
-    pub fn insert(&self, key: String, value: String) -> Result<Option<String>, Error> {
+    pub fn insert(&self, key: String, value: String) -> ::Result<Option<String>> {
         self.write(|data| data.insert(key, value))
     }
 
-    pub fn save(&self) -> Result<(), Error> {
+    pub fn save(&self) -> ::Result<()> {
         let mut file = find_or_create_snapfile()?;
-        let mut bytes = self.read(serialize)??;
+        let bytes = self.read(serialize)??;
 
-        Ok(file.write_all(&mut bytes)?)
+        file.write_all(&bytes).map_err(|e| e.into())
     }
 
-    fn read<F, T>(&self, f: F) -> Result<T, Error>
+    fn read<F, T>(&self, f: F) -> ::Result<T>
     where
         F: FnOnce(&Data) -> T,
     {
         match self.data.read() {
             Ok(ref guard) => Ok(f(guard)),
-            Err(_) => unimplemented!(),
+            Err(e) => bail!("{}", e),
         }
     }
 
-    fn read_and_then<F, T>(&self, f: F) -> Result<T, Error>
-    where
-        F: FnOnce(&Data) -> Result<T, Error>,
-    {
-        match self.data.read() {
-            Ok(ref guard) => Ok(f(guard)?),
-            Err(_) => unimplemented!(),
-        }
-    }
-
-    fn write<F, T>(&self, f: F) -> Result<T, Error>
+    fn write<F, T>(&self, f: F) -> ::Result<T>
     where
         F: FnOnce(&mut Data) -> T,
     {
         match self.data.write() {
             Ok(ref mut guard) => Ok(f(guard)),
-            Err(_) => unimplemented!(),
+            Err(e) => bail!("{}", e),
         }
     }
 }
 
-fn find_or_create_snapfile() -> Result<File, Error> {
+fn find_or_create_snapfile() -> ::Result<File> {
     let path = trail!("tests", ".snapfile");
 
     if let Some(parent) = path.parent() {
@@ -103,5 +88,5 @@ fn find_or_create_snapfile() -> Result<File, Error> {
         .read(true)
         .write(true)
         .open(path)
-        .map_err(Error::from)
+        .map_err(|e| e.into())
 }

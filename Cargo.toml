@@ -1,10 +1,10 @@
 [package]
 name = "snaptest"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Zachary Golba <zachary.golba@postlight.com>"]
 categories = ["development-tools", "rust-patterns"]
 description = "Dead simple snapshot testing"
-documentation = "https://docs.rs/snaptest/0.1"
+documentation = "https://docs.rs/snaptest/0.2"
 keywords = ["macro", "snapshot", "testing"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
@@ -17,3 +17,4 @@ lazy_static = "1.0.0"
 serde = "1.0.33"
 skittles = "0.1.0"
 trail = "0.1.0"
+diff = "0.1.11"
