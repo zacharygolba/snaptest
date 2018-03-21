@@ -68,7 +68,9 @@ snaptest!{
 
 Next time your test runs, a snapshot will be added to a local `.snapfile` to compare against future test results. If you get a different result back than what matches the snapshot, the test will fail and the diff will be printed to the console.
 
-![Snaptest Example](./docs/example.png)
+<p align="center">
+  <img  alt="Snaptest Example" src="./docs/example.png" height="728" width="694" />
+</p>
 
 ## License
 
