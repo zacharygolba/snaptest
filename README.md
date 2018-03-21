@@ -37,31 +37,44 @@ extern crate snaptest;
 Derive `Debug` on types that you want to use with snaptest:
 
 ```rust
+#[macro_use]
+extern crate failure;
+#[cfg_attr(test, macro_use)]
+extern crate snaptest;
+
 use std::str::FromStr;
 
 #[derive(Debug)]
-pub struct User {
-    connection: Connection,
-    name: String,
+enum Hero {
+    Batman,
+    TheFlash,
+    WonderWoman,
 }
 
-#[derive(Debug)]
-pub enum Connection {
-    Online,
-    Offline,
+impl FromStr for Hero {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Hero, Self::Err> {
+        match value {
+            "Batman" => Ok(Hero::Batman),
+            "The Flash" => Ok(Hero::TheFlash),
+            "Wonder Woman" => Ok(Hero::WonderWoman),
+            _ => bail!(r#""{}" is not a hero"#),
+        }
+    }
 }
 
-impl FromStr for User {
-  // ...
-}
-```
+#[cfg(test)]
+mod tests {
+    use failure::Error;
 
-Now, in the test module for the `User` struct:
+    use super::Hero; // no pun intended...
 
-```rust
-snaptest!{
-    fn parse_user() -> Result<User, Error> {
-        "Zak:online".parse()
+    snaptest!{
+        fn parse_heros() -> Result<Vec<Hero>, Error> {
+            let heros = ["Batman", "The Flash", "Wonder Woman"];
+            heros.iter().map(|hero| hero.parse()).collect()
+        }
     }
 }
 ```
@@ -69,7 +82,7 @@ snaptest!{
 Next time your test runs, a snapshot will be added to a local `.snapfile` to compare against future test results. If you get a different result back than what matches the snapshot, the test will fail and the diff will be printed to the console.
 
 <p align="center">
-  <img  alt="Snaptest Example" src="./docs/example.png" height="728" width="694" />
+  <img  alt="Snaptest Example" src="./docs/example.png" height="915" width="818" />
 </p>
 
 ## License
