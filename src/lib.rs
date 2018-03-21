@@ -24,5 +24,6 @@ pub use report::Report;
 pub use test::Test;
 
 /// A convenient wrapper around [`Result`].
+///
 /// [`Result`]: https://doc.rust-lang.org/std/result/enum.Result.html
 pub type Result<T> = ::std::result::Result<T, Error>;
